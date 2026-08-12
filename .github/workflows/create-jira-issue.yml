@@ -7,28 +7,31 @@ on:
 jobs:
   create-jira-issue:
     runs-on: ubuntu-latest
-    permissions:
-      issues: read
-      contents: read
     steps:
       - name: Parse Issue Body and Send to Jira Automation
         uses: actions/github-script@v7
         env:
           JIRA_WEBHOOK_URL: ${{ secrets.JIRA_WEBHOOK_URL }}
+          JIRA_WEBHOOK_TOKEN: ${{ secrets.JIRA_WEBHOOK_TOKEN }}
         with:
           script: |
             const webhookUrl = process.env.JIRA_WEBHOOK_URL;
+            const webhookToken = process.env.JIRA_WEBHOOK_TOKEN;
+
             if (!webhookUrl) {
               throw new Error("JIRA_WEBHOOK_URL Secret이 설정되지 않았습니다.");
+            }
+
+            if (!webhookToken) {
+              throw new Error("JIRA_WEBHOOK_TOKEN Secret이 설정되지 않았습니다.");
             }
 
             const body = context.payload.issue.body || '';
             const title = context.payload.issue.title || '';
 
-            // 유연해진 H3 헤더 기반 파싱 함수
+            // GitHub Issue Form 파싱 (### 라벨명 기반)
             const get = (label, bodyText) => {
-              // ### 라벨 구문 뒤의 빈줄/공백을 유연하게 처리
-              const regex = new RegExp(`###\\s*${label}\\s*\\n+([\\s\\S]*?)(?=\\n+###|$)`);
+              const regex = new RegExp(`### ${label}\\s*\\n([\\s\\S]*?)(?=\\n###|$)`);
               const match = bodyText.match(regex);
               return match ? match[1].trim() : '';
             };
@@ -51,20 +54,31 @@ jobs:
               actor: context.payload.sender.login
             };
 
-            console.log('Parsed Payload:', JSON.stringify(payload, null, 2));
+            console.log(
+              'Sending Payload:',
+              JSON.stringify(payload, null, 2)
+            );
 
             const response = await fetch(webhookUrl, {
               method: 'POST',
-              headers: { 
+              headers: {
                 'Content-Type': 'application/json',
-                'Accept': 'application/json'
+                'Accept': 'application/json',
+                'X-Automation-Webhook-Token': webhookToken
               },
               body: JSON.stringify(payload)
             });
 
-            console.log('Jira Webhook Response Status:', response.status);
+            console.log(
+              'Jira Webhook Response Status:',
+              response.status
+            );
+
+            const responseText = await response.text();
+            console.log('Jira Webhook Response:', responseText);
 
             if (!response.ok) {
-              const errorText = await response.text();
-              throw new Error(`Webhook 전송 실패 (${response.status}): ${errorText}`);
+              throw new Error(
+                `Webhook 전송 실패 (${response.status}): ${responseText}`
+              );
             }
