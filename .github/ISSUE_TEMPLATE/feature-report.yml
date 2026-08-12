@@ -1,0 +1,23 @@
+name: Feature Request
+description: 새로운 기능 요청 이슈 작성
+title: "[Feat] "
+labels: ["feature"]
+body:
+  - type: dropdown
+    id: issue_type
+    attributes:
+      label: ⚡ 이슈 유형
+      options:
+        - Story
+        - Chore
+        - Bug
+    validations:
+      required: true
+
+  - type: input
+    id: branch_name
+    attributes:
+      label: 🌿 브랜치명
+      placeholder: e.g. login-page
+    validations:
+      required: true
