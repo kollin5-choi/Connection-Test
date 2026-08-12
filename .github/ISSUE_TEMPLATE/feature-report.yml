@@ -1,6 +1,6 @@
 name: Feature Request
 description: 새로운 기능 요청 및 JIRA 연동 이슈 작성
-title: ""
+title: "[Feat] "
 labels: []
 body:
   - type: dropdown
