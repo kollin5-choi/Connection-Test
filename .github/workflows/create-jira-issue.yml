@@ -1,139 +1,54 @@
-name: Create Jira issue
+name: Create Jira Issue from GitHub Issue
 
 on:
   issues:
-    types:
-      - opened
+    types: [opened]
 
 jobs:
-  issue-sync:
-    name: Create Jira issue
+  create-jira-issue:
     runs-on: ubuntu-latest
-    env:
-      JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
-      JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
-      JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
-      PROJECT_KEY: ${{ secrets.PROJECT_KEY }}
-
     steps:
-      # 1. JIRA 로그인 검증
-      - name: JIRA Login
-        run: |
-          curl --fail --request GET \
-            --url "https://${JIRA_BASE_URL}/rest/api/3/myself" \
-            --user "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" \
-            --header "Accept: application/json"
-
-      # 2. 기준 브랜치(develop) 체크아웃
-      - name: Checkout develop
-        uses: actions/checkout@v4
+      - name: Parse Issue Body and Send to Jira Automation
+        uses: actions/github-script@v7
         with:
-          ref: develop
+          script: |
+            const body = context.payload.issue.body || '';
+            const title = context.payload.issue.title || '';
 
-      # 3. 이슈 템플릿 값 파싱
-      - name: Issue Parser
-        uses: stefanbuck/github-issue-parser@v3
-        id: issue-parser
-        with:
-          template-path: .github/ISSUE_TEMPLATE/feature-report.yml
+            // GitHub Issue Form 파싱 (yaml form은 body에 마크다운으로 전달됨)
+            const get = (label, body) => {
+              const regex = new RegExp(`### ${label}\\s*\\n([\\s\\S]*?)(?=\\n###|$)`);
+              const match = body.match(regex);
+              return match ? match[1].trim() : '';
+            };
 
-      # 4. JIRA 이슈 생성
-      - name: Create JIRA issue
-        id: create-issue
-        run: |
-          LABELS=$(echo "${{ steps.issue-parser.outputs.issueparser_issue_label }}" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | jq -R . | jq -s .)
+            const issueType    = get('⚡ 이슈 유형', body);
+            const epicNumber   = get('🎟 상위 에픽 Number', body);
+            const issueLabel   = get('🏷 레이블', body);
+            const branchName   = get('🌿 브랜치명', body);
+            const description  = get('📌 이슈 설명', body);
 
-          response=$(curl --fail --silent --request POST \
-            --url "https://${JIRA_BASE_URL}/rest/api/3/issue" \
-            --user "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" \
-            --header "Accept: application/json" \
-            --header "Content-Type: application/json" \
-            --data "{
-              \"fields\": {
-                \"issuetype\": {
-                  \"name\": \"${{ steps.issue-parser.outputs.issueparser_issue_type }}\"
-                },
-                \"labels\": ${LABELS},
-                \"parent\": {
-                  \"key\": \"${{ steps.issue-parser.outputs.issueparser_epic_number }}\"
-                },
-                \"project\": {
-                  \"key\": \"${PROJECT_KEY}\"
-                },
-                \"summary\": \"[BE] ${{ github.event.issue.title }}\",
-                \"description\": {
-                  \"version\": 1,
-                  \"type\": \"doc\",
-                  \"content\": [
-                    {
-                      \"type\": \"heading\",
-                      \"attrs\": { \"level\": 3 },
-                      \"content\": [
-                        {
-                          \"type\": \"text\",
-                          \"text\": \"🌿 브랜치명\"
-                        }
-                      ]
-                    },
-                    {
-                      \"type\": \"paragraph\",
-                      \"content\": [
-                        {
-                          \"type\": \"text\",
-                          \"text\": \"${{ steps.issue-parser.outputs.issueparser_branch_name }}\"
-                        }
-                      ]
-                    },
-                    {
-                      \"type\": \"heading\",
-                      \"attrs\": { \"level\": 3 },
-                      \"content\": [
-                        {
-                          \"type\": \"text\",
-                          \"text\": \"📌 이슈 설명\"
-                        }
-                      ]
-                    },
-                    {
-                      \"type\": \"paragraph\",
-                      \"content\": [
-                        {
-                          \"type\": \"text\",
-                          \"text\": \"${{ steps.issue-parser.outputs.issueparser_issue_description }}\"
-                        }
-                      ]
-                    }
-                  ]
-                }
+            const payload = {
+              data: {
+                title,
+                issueType,
+                epicNumber,
+                issueLabel,
+                branchName,
+                description,
+                githubIssueUrl: context.payload.issue.html_url,
+                githubIssueNumber: context.payload.issue.number,
+                actor: context.payload.sender.login
               }
-            }")
+            };
 
-          echo "Response: $response"
-          issue_key=$(echo "$response" | jq -r '.key')
-          echo "key=$issue_key" >> $GITHUB_ENV
+            const response = await fetch(
+              '${{ secrets.JIRA_WEBHOOK_URL }}',
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+              }
+            );
 
-      # 5. JIRA 이슈 키로 신규 브랜치 생성 및 Push
-      - name: Create branch with JIRA issue key
-        run: |
-          TICKET_NUMBER="${{ env.key }}"
-          BRANCH_NAME="${{ steps.issue-parser.outputs.issueparser_branch_name }}"
-          NEW_BRANCH_NAME="feature/${TICKET_NUMBER}_$(echo ${BRANCH_NAME} | sed 's/ /-/g')"
-          git checkout -b "${NEW_BRANCH_NAME}"
-          git push origin "${NEW_BRANCH_NAME}"
-
-      # 6. GitHub 이슈 제목 업데이트 ([JIRA-KEY] 원래제목)
-      - name: Update issue title
-        uses: actions-cool/issues-helper@v3
-        with:
-          actions: 'update-issue'
-          token: ${{ secrets.GITHUB_TOKEN }}
-          title: '[${{ env.key }}] ${{ github.event.issue.title }}'
-
-      # 7. GitHub 이슈에 JIRA 링크 댓글 추가
-      - name: Add comment with Jira issue link
-        uses: actions-cool/issues-helper@v3
-        with:
-          actions: 'create-comment'
-          token: ${{ secrets.GITHUB_TOKEN }}
-          issue-number: ${{ github.event.issue.number }}
-          body: 'Jira Issue Created: [${{ env.key }}](https://${{ secrets.JIRA_BASE_URL }}/browse/${{ env.key }})'
+            console.log('Status:', response.status);
