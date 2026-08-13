@@ -36,15 +36,29 @@ jobs:
               return match ? match[1].trim() : '';
             };
 
-            const issueType    = get('⚡ 이슈 유형', body);
-            const epicNumber   = get('🎟 상위 에픽 Number', body);
-            const issueLabel   = get('🏷 레이블', body);
-            const branchName   = get('🌿 브랜치명', body);
-            const description  = get('📌 이슈 설명', body);
+            const issueType   = get('⚡ 이슈 유형', body);
+            const epicNumber  = get('🎟 상위 에픽 Number', body);
+            const issueLabel  = get('🏷 레이블', body);
+            const branchName  = get('🌿 브랜치명', body);
+            const description = get('📌 이슈 설명', body);
+
+            // GitHub에서 선택한 이슈 유형명을 Jira Issue Type ID로 변환
+            // 아래 ID는 TEKDEV 프로젝트의 실제 Issue Type ID로 교체하세요.
+            const issueTypeMap = {
+              Story: 'REPLACE_WITH_STORY_ISSUE_TYPE_ID',
+              Bug: 'REPLACE_WITH_BUG_ISSUE_TYPE_ID'
+            };
+
+            const issueTypeId = issueTypeMap[issueType];
+
+            if (!issueTypeId || issueTypeId.startsWith('REPLACE_WITH_')) {
+              throw new Error(`Jira Issue Type ID가 설정되지 않았습니다: ${issueType}`);
+            }
 
             const payload = {
               title,
               issueType,
+              issueTypeId,
               epicNumber,
               issueLabel,
               branchName,
@@ -54,10 +68,7 @@ jobs:
               actor: context.payload.sender.login
             };
 
-            console.log(
-              'Sending Payload:',
-              JSON.stringify(payload, null, 2)
-            );
+            console.log('Sending Payload:', JSON.stringify(payload, null, 2));
 
             const response = await fetch(webhookUrl, {
               method: 'POST',
@@ -69,16 +80,11 @@ jobs:
               body: JSON.stringify(payload)
             });
 
-            console.log(
-              'Jira Webhook Response Status:',
-              response.status
-            );
+            console.log('Jira Webhook Response Status:', response.status);
 
             const responseText = await response.text();
             console.log('Jira Webhook Response:', responseText);
 
             if (!response.ok) {
-              throw new Error(
-                `Webhook 전송 실패 (${response.status}): ${responseText}`
-              );
+              throw new Error(`Webhook 전송 실패 (${response.status}): ${responseText}`);
             }
