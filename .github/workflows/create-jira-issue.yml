@@ -8,6 +8,9 @@ jobs:
   create-jira-issue:
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: write
+
     steps:
       - name: Parse Issue Body and Send to Jira Automation
         uses: actions/github-script@v7
@@ -15,7 +18,6 @@ jobs:
           JIRA_WEBHOOK_URL: ${{ secrets.JIRA_WEBHOOK_URL }}
           JIRA_WEBHOOK_TOKEN: ${{ secrets.JIRA_WEBHOOK_TOKEN }}
 
-          # Repository Variables
           STORY_ISSUE_TYPE_ID: ${{ vars.STORY_ISSUE_TYPE_ID }}
           BUG_ISSUE_TYPE_ID: ${{ vars.BUG_ISSUE_TYPE_ID }}
 
@@ -50,7 +52,7 @@ jobs:
             const branchName  = get('🌿 브랜치명', body);
             const description = get('📌 이슈 설명', body);
 
-            // GitHub에서 선택한 이슈 유형명 → Jira Issue Type ID
+            // Jira Issue Type ID 매핑
             const issueTypeMap = {
               Story: process.env.STORY_ISSUE_TYPE_ID,
               Bug: process.env.BUG_ISSUE_TYPE_ID
@@ -64,13 +66,48 @@ jobs:
               );
             }
 
+            // 생성할 GitHub 브랜치명
+            const newBranchName = `${epicNumber}-${branchName}`;
+
+            console.log(`Branch to create: ${newBranchName}`);
+
+            // 기본 브랜치 확인
+            const repo = context.repo;
+
+            const { data: repository } = await github.rest.repos.get({
+              owner: repo.owner,
+              repo: repo.repo
+            });
+
+            const defaultBranch = repository.default_branch;
+
+            // 기본 브랜치의 최신 commit SHA 조회
+            const { data: refData } = await github.rest.git.getRef({
+              owner: repo.owner,
+              repo: repo.repo,
+              ref: `heads/${defaultBranch}`
+            });
+
+            const sha = refData.object.sha;
+
+            // 브랜치 생성
+            await github.rest.git.createRef({
+              owner: repo.owner,
+              repo: repo.repo,
+              ref: `refs/heads/${newBranchName}`,
+              sha
+            });
+
+            console.log(`Branch created: ${newBranchName}`);
+
+            // Jira Automation으로 전송할 Payload
             const payload = {
               title,
               issueType,
               issueTypeId,
               epicNumber,
               issueLabel,
-              branchName,
+              branchName: newBranchName,
               description,
               githubIssueUrl: context.payload.issue.html_url,
               githubIssueNumber: context.payload.issue.number,
