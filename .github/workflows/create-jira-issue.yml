@@ -7,12 +7,18 @@ on:
 jobs:
   create-jira-issue:
     runs-on: ubuntu-latest
+
     steps:
       - name: Parse Issue Body and Send to Jira Automation
         uses: actions/github-script@v7
         env:
           JIRA_WEBHOOK_URL: ${{ secrets.JIRA_WEBHOOK_URL }}
           JIRA_WEBHOOK_TOKEN: ${{ secrets.JIRA_WEBHOOK_TOKEN }}
+
+          # Repository Variables
+          STORY_ISSUE_TYPE_ID: ${{ vars.STORY_ISSUE_TYPE_ID }}
+          BUG_ISSUE_TYPE_ID: ${{ vars.BUG_ISSUE_TYPE_ID }}
+
         with:
           script: |
             const webhookUrl = process.env.JIRA_WEBHOOK_URL;
@@ -29,9 +35,11 @@ jobs:
             const body = context.payload.issue.body || '';
             const title = context.payload.issue.title || '';
 
-            // GitHub Issue Form 파싱 (### 라벨명 기반)
+            // GitHub Issue Form 파싱
             const get = (label, bodyText) => {
-              const regex = new RegExp(`### ${label}\\s*\\n([\\s\\S]*?)(?=\\n###|$)`);
+              const regex = new RegExp(
+                `### ${label}\\s*\\n([\\s\\S]*?)(?=\\n###|$)`
+              );
               const match = bodyText.match(regex);
               return match ? match[1].trim() : '';
             };
@@ -42,17 +50,18 @@ jobs:
             const branchName  = get('🌿 브랜치명', body);
             const description = get('📌 이슈 설명', body);
 
-            // GitHub에서 선택한 이슈 유형명을 Jira Issue Type ID로 변환
-            // 아래 ID는 TEKDEV 프로젝트의 실제 Issue Type ID로 교체하세요.
+            // GitHub에서 선택한 이슈 유형명 → Jira Issue Type ID
             const issueTypeMap = {
-              Story: 'REPLACE_WITH_STORY_ISSUE_TYPE_ID',
-              Bug: 'REPLACE_WITH_BUG_ISSUE_TYPE_ID'
+              Story: process.env.STORY_ISSUE_TYPE_ID,
+              Bug: process.env.BUG_ISSUE_TYPE_ID
             };
 
             const issueTypeId = issueTypeMap[issueType];
 
-            if (!issueTypeId || issueTypeId.startsWith('REPLACE_WITH_')) {
-              throw new Error(`Jira Issue Type ID가 설정되지 않았습니다: ${issueType}`);
+            if (!issueTypeId) {
+              throw new Error(
+                `Jira Issue Type ID가 설정되지 않았습니다: ${issueType}`
+              );
             }
 
             const payload = {
@@ -68,7 +77,10 @@ jobs:
               actor: context.payload.sender.login
             };
 
-            console.log('Sending Payload:', JSON.stringify(payload, null, 2));
+            console.log(
+              'Sending Payload:',
+              JSON.stringify(payload, null, 2)
+            );
 
             const response = await fetch(webhookUrl, {
               method: 'POST',
@@ -80,11 +92,20 @@ jobs:
               body: JSON.stringify(payload)
             });
 
-            console.log('Jira Webhook Response Status:', response.status);
+            console.log(
+              'Jira Webhook Response Status:',
+              response.status
+            );
 
             const responseText = await response.text();
-            console.log('Jira Webhook Response:', responseText);
+
+            console.log(
+              'Jira Webhook Response:',
+              responseText
+            );
 
             if (!response.ok) {
-              throw new Error(`Webhook 전송 실패 (${response.status}): ${responseText}`);
+              throw new Error(
+                `Webhook 전송 실패 (${response.status}): ${responseText}`
+              );
             }
